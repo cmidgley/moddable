@@ -67,6 +67,8 @@ static void xs_serial_format_set_aux(xsMachine *the, xsSerial s, char *format);
 		((void)((_ASSERTION) || (xs_serial_throw(the,GetLastError(),NULL,0), 1)))
 #endif
 
+CRITICAL_SECTION critical;
+
 static unsigned int __stdcall xs_serial_loop(void* it)
 {
 	xsSerial s = it;
@@ -94,6 +96,7 @@ static unsigned int __stdcall xs_serial_loop(void* it)
         	else
 				break;
    		}
+		EnterCriticalSection(&critical);
    		if (s->hasOnReadable && (which & EV_RXCHAR) && !s->readJob) {
 			xsSerialJob readJob = c_calloc(sizeof(xsSerialJobRecord), 1);
 			if (readJob == NULL)
@@ -112,6 +115,7 @@ static unsigned int __stdcall xs_serial_loop(void* it)
 			fxQueueWorkerJob(s->the, writeJob);
 			s->writeJob = writeJob;
 		}
+		LeaveCriticalSection(&critical);
 	}
 	return 0;
 }
@@ -150,6 +154,7 @@ void xs_serial_constructor(xsMachine *the)
 	DCB dcb;
 	COMMTIMEOUTS timeouts;
 	xsVars(1);
+	InitializeCriticalSection(&critical);
 	xsTry {
 		s = calloc(1, sizeof(xsSerialRecord));
 		xsElseThrow(s != NULL);
@@ -286,9 +291,11 @@ void xs_serial_read(xsMachine *the)
 void xs_serial_read_callback(void* machine, void* it)
 {
 	xsSerialJob readJob = it;
+	EnterCriticalSection(&critical);
 	xsSerial s = readJob->serial;
 	if (s) {
 		s->readJob = NULL;
+		LeaveCriticalSection(&critical);
 		xsBeginHost(machine);
 		xsTry {
 			xsCallFunction1(s->onReadable, s->obj, xsInteger(1));
@@ -296,7 +303,8 @@ void xs_serial_read_callback(void* machine, void* it)
 		xsCatch {
 		}
 		xsEndHost(machine);
-	}
+	} else
+		LeaveCriticalSection(&critical);
 }
 
 void xs_serial_purge(xsMachine *the)
@@ -361,9 +369,11 @@ void xs_serial_write(xsMachine *the)
 void xs_serial_write_callback(void* machine, void* it)
 {
 	xsSerialJob writeJob = it;
+	EnterCriticalSection(&critical);
 	xsSerial s = writeJob->serial;
 	if (s) {
 		s->writeJob = NULL;
+		LeaveCriticalSection(&critical);
 		xsBeginHost(machine);
 		xsTry {
 			xsCallFunction1(s->onWritable, s->obj, xsInteger(1));
@@ -371,7 +381,8 @@ void xs_serial_write_callback(void* machine, void* it)
 		xsCatch {
 		}
 		xsEndHost(machine);
-	}
+	} else
+		LeaveCriticalSection(&critical);
 }
 
 void xs_serial_format_get(xsMachine *the)
